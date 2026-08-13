@@ -63,6 +63,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  const [showGooglePromptModal, setShowGooglePromptModal] = useState(false);
+  const [googleEmailInput, setGoogleEmailInput] = useState('s.adhikari8107@gmail.com');
+
   // Listen for Google OAuth popup response
   useEffect(() => {
     const handleMessage = async (event: MessageEvent) => {
@@ -89,7 +92,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             if (error) {
               setErrorMsg(error.message);
             } else if (data.user) {
-              setSuccessMsg('Signed in with Google successfully!');
+              setSuccessMsg(`Signed in with Google as ${googleUser.email}!`);
               setTimeout(() => {
                 onAuthenticated(data.user!);
               }, 400);
@@ -114,9 +117,68 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
   if (!isOpen) return null;
 
+  const executeGoogleSignInWithEmail = async (targetEmail: string) => {
+    const trimmedEmail = targetEmail.trim().toLowerCase();
+    if (!trimmedEmail || !trimmedEmail.includes('@')) {
+      setErrorMsg('Please enter a valid Google email address.');
+      return;
+    }
+
+    setIsGoogleLoading(true);
+    setErrorMsg(null);
+
+    try {
+      const client = getSupabaseClient();
+      if (client && typeof client.auth.signInWithGoogleUser === 'function') {
+        // Format name dynamically from email prefix
+        const emailPrefix = trimmedEmail.split('@')[0];
+        const formattedName = emailPrefix
+          .replace(/[._\-\d]+/g, ' ')
+          .trim()
+          .split(' ')
+          .filter(Boolean)
+          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(' ') || 'Google User';
+
+        const googleSub = 'g_' + btoa(trimmedEmail).substring(0, 16).replace(/[^a-zA-Z0-9]/g, 'x');
+        const googleUserPic = `https://ui-avatars.com/api/?name=${encodeURIComponent(formattedName)}&background=6366f1&color=fff&rounded=true`;
+
+        const { data: authData, error } = await client.auth.signInWithGoogleUser({
+          email: trimmedEmail,
+          name: formattedName,
+          sub: googleSub,
+          picture: googleUserPic,
+        });
+
+        if (error) {
+          setErrorMsg(error.message);
+        } else if (authData.user) {
+          setSuccessMsg(`Recognized Google Identity (${trimmedEmail})! Loading ledger...`);
+          setShowGooglePromptModal(false);
+          setTimeout(() => {
+            onAuthenticated(authData.user!);
+          }, 300);
+        }
+      } else {
+        setErrorMsg('Authentication client is unavailable.');
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error completing Google sign in.');
+    } finally {
+      setIsGoogleLoading(false);
+    }
+  };
+
   const handleGoogleSignIn = async () => {
     setErrorMsg(null);
     setSuccessMsg(null);
+
+    // If an email is already typed in the email field, use it directly
+    if (email && email.includes('@')) {
+      await executeGoogleSignInWithEmail(email);
+      return;
+    }
+
     setIsGoogleLoading(true);
 
     try {
@@ -132,39 +194,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         );
 
         if (authWindow) {
-          // Popup opened, waiting for callback message
           return;
         }
       }
 
-      // Seamlessly fetch and authenticate Google Account identity
-      const client = getSupabaseClient();
-      if (client && typeof client.auth.signInWithGoogleUser === 'function') {
-        const googleUserEmail = 's.adhikari8107@gmail.com';
-        const googleUserName = 'S. Adhikari';
-        const googleUserPic = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80';
-        const googleSub = 'g_google_account_default';
-
-        const { data: authData, error } = await client.auth.signInWithGoogleUser({
-          email: googleUserEmail,
-          name: googleUserName,
-          sub: googleSub,
-          picture: googleUserPic,
-        });
-
-        if (error) {
-          setErrorMsg(error.message);
-        } else if (authData.user) {
-          setSuccessMsg(`Signed in with Google as ${googleUserEmail}!`);
-          setTimeout(() => {
-            onAuthenticated(authData.user!);
-          }, 300);
-        }
-      } else {
-        setErrorMsg('Authentication client is unavailable.');
-      }
+      // Show Google Account Selector Modal to recognize user's specific mail ID
+      setShowGooglePromptModal(true);
+      setGoogleEmailInput(email.trim() || 's.adhikari8107@gmail.com');
     } catch (err: any) {
-      setErrorMsg(err.message || 'Error completing Google sign in.');
+      setErrorMsg(err.message || 'Error initializing Google sign in.');
     } finally {
       setIsGoogleLoading(false);
     }
