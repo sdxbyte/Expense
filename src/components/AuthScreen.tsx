@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Lock, 
   Mail, 
@@ -10,12 +10,34 @@ import {
   LogIn, 
   AlertCircle,
   CheckCircle2,
-  X
+  X,
+  Loader2
 } from 'lucide-react';
 import { getSupabaseClient } from '../services/supabaseClient';
 import { User } from '@supabase/supabase-js';
 import { CountryPhoneInput } from './CountryPhoneInput';
 import { OtpVerificationStep } from './OtpVerificationStep';
+
+const GoogleIcon = () => (
+  <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+    <path
+      fill="#EA4335"
+      d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.7 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.2 9 5 12 5z"
+    />
+    <path
+      fill="#4285F4"
+      d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.8z"
+    />
+    <path
+      fill="#FBBC05"
+      d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.9 7.3C.7 9.7 0 10.8 0 12s.7 2.3 1.9 4.7l3.7-2.9z"
+    />
+    <path
+      fill="#34A853"
+      d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.2-6.4-5.2L1.9 16C3.7 19.7 7.5 23 12 23z"
+    />
+  </svg>
+);
 
 interface AuthScreenProps {
   onAuthenticated: (user: User) => void;
@@ -37,10 +59,92 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  // Listen for Google OAuth popup response
+  useEffect(() => {
+    const handleMessage = async (event: MessageEvent) => {
+      if (event.data?.type === 'GOOGLE_AUTH_SUCCESS') {
+        const { user: googleUser } = event.data;
+        if (!googleUser || !googleUser.email) {
+          setErrorMsg('Failed to receive Google profile data.');
+          setIsGoogleLoading(false);
+          return;
+        }
+
+        setIsGoogleLoading(true);
+        setErrorMsg(null);
+        try {
+          const client = getSupabaseClient();
+          if (client && typeof client.auth.signInWithGoogleUser === 'function') {
+            const { data, error } = await client.auth.signInWithGoogleUser({
+              email: googleUser.email,
+              name: googleUser.name,
+              sub: googleUser.sub,
+              picture: googleUser.picture,
+            });
+
+            if (error) {
+              setErrorMsg(error.message);
+            } else if (data.user) {
+              setSuccessMsg('Signed in with Google successfully!');
+              setTimeout(() => {
+                onAuthenticated(data.user!);
+              }, 400);
+            }
+          } else {
+            setErrorMsg('Authentication client is unavailable.');
+          }
+        } catch (err: any) {
+          setErrorMsg(err.message || 'Error completing Google sign in.');
+        } finally {
+          setIsGoogleLoading(false);
+        }
+      } else if (event.data?.type === 'GOOGLE_AUTH_ERROR') {
+        setErrorMsg(event.data.error || 'Google authentication was canceled.');
+        setIsGoogleLoading(false);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [onAuthenticated]);
+
   if (!isOpen) return null;
+
+  const handleGoogleSignIn = async () => {
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    setIsGoogleLoading(true);
+
+    try {
+      const res = await fetch('/api/auth/google/url');
+      const data = await res.json();
+
+      if (!res.ok || !data.success || !data.url) {
+        setErrorMsg(data.error || 'Google Sign-In is not currently available. Please ensure GOOGLE_CLIENT_ID is configured.');
+        setIsGoogleLoading(false);
+        return;
+      }
+
+      // Open Google OAuth Provider URL in popup window directly
+      const authWindow = window.open(
+        data.url,
+        'google_oauth_popup',
+        'width=550,height=650,top=100,left=200,scrollbars=yes,status=yes'
+      );
+
+      if (!authWindow) {
+        setErrorMsg('Popup was blocked by your browser. Please allow popups for this site to continue with Google.');
+        setIsGoogleLoading(false);
+      }
+    } catch (err: any) {
+      setErrorMsg('Failed to initiate Google authentication. Please check your connection.');
+      setIsGoogleLoading(false);
+    }
+  };
 
   const validatePasswordComplexity = (pwd: string): string | null => {
     if (pwd.length < 8) {
@@ -240,6 +344,35 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 <UserPlus className="w-3.5 h-3.5" />
                 <span>Create Account</span>
               </button>
+            </div>
+
+            {/* Google Sign-In Button */}
+            <button
+              type="button"
+              onClick={handleGoogleSignIn}
+              disabled={isLoading || isGoogleLoading}
+              aria-label="Continue with Google"
+              className="w-full py-2.5 px-4 bg-slate-800/90 hover:bg-slate-800 border border-slate-700/80 hover:border-slate-600 rounded-xl text-xs font-semibold text-slate-100 hover:text-white transition-all flex items-center justify-center gap-2.5 shadow-sm cursor-pointer disabled:opacity-50"
+            >
+              {isGoogleLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+                  <span>Connecting to Google...</span>
+                </>
+              ) : (
+                <>
+                  <GoogleIcon />
+                  <span>Continue with Google</span>
+                </>
+              )}
+            </button>
+
+            {/* Divider */}
+            <div className="relative flex items-center justify-center my-1">
+              <div className="border-t border-slate-800 w-full"></div>
+              <span className="bg-slate-900 px-2.5 text-[10px] uppercase font-bold text-slate-400 tracking-wider shrink-0">
+                or with email
+              </span>
             </div>
 
             {/* Feedback Messages */}

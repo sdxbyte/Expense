@@ -6,6 +6,7 @@ import { createServer as createViteServer } from 'vite';
 import { runGitCommand, performSecretScan } from './src/services/gitCommandRunner';
 import { initSqliteSchema } from './src/db/sqliteDB';
 import { runGmailSenderDiagnostic } from './src/services/gmailClient';
+import { getGoogleOAuthUrl, handleGoogleOAuthCallback } from './src/services/googleAuthServer';
 
 dotenv.config();
 
@@ -223,6 +224,10 @@ app.get('/api/gmail/diagnostic', async (req: Request, res: Response) => {
     });
   }
 });
+
+// Google OAuth Authentication Endpoints
+app.get('/api/auth/google/url', getGoogleOAuthUrl);
+app.get(['/api/auth/google/callback', '/api/auth/google/callback/'], handleGoogleOAuthCallback);
 
 // Health check endpoint
 app.get('/api/health', (req: Request, res: Response) => {

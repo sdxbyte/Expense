@@ -148,6 +148,55 @@ export function createLocalAuthClient(): any {
           error: null,
         };
       },
+      async signInWithGoogleUser({ email, name, sub, picture }: { email: string; name?: string; sub: string; picture?: string }) {
+        const trimmedEmail = email.trim().toLowerCase();
+        const users = getLocalUsers();
+        let account = users[trimmedEmail];
+
+        if (!account) {
+          // Create new SAARTHI user account using verified Google identity
+          const newUser: User = {
+            id: 'usr_g_' + sub.substring(0, 12),
+            email: trimmedEmail,
+            user_metadata: {
+              full_name: name || 'Google User',
+              picture: picture || '',
+              google_sub: sub,
+              provider: 'google',
+            },
+            aud: 'authenticated',
+            created_at: new Date().toISOString(),
+            app_metadata: { provider: 'google' },
+            role: 'authenticated', // Standard default user role, NEVER admin
+          } as unknown as User;
+
+          account = { user: newUser, passwordHash: '' };
+          users[trimmedEmail] = account;
+          saveLocalUsers(users);
+        } else {
+          // Account already exists with this verified email -> Link Google provider safely
+          // Preserve existing SAARTHI account ID, created_at, role and permissions
+          account.user.user_metadata = {
+            ...account.user.user_metadata,
+            google_sub: sub,
+            picture: picture || account.user.user_metadata?.picture || '',
+            full_name: name || account.user.user_metadata?.full_name || '',
+          };
+          users[trimmedEmail] = account;
+          saveLocalUsers(users);
+        }
+
+        setLocalSessionUser(account.user);
+        notifyListeners('SIGNED_IN', account.user);
+
+        return {
+          data: {
+            user: account.user,
+            session: { user: account.user, access_token: generateSecureSessionToken() },
+          },
+          error: null,
+        };
+      },
       async signOut() {
         setLocalSessionUser(null);
         notifyListeners('SIGNED_OUT', null);
