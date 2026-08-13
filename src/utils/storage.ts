@@ -8,6 +8,8 @@ import { triggerGitAutoSync } from '../services/gitSyncService';
 import { AmountSchema, ExpenseSchema, BackupDataSchemaV2 } from './schemas';
 import { sanitizeCsvCell, roundMoney } from './crypto';
 
+import { MASTER_SHARED_ACCOUNT_ID } from '../db/migration';
+
 export async function requireAuthUser() {
   const user = await getCurrentSupabaseUser();
   if (!user) {
@@ -38,7 +40,7 @@ export async function saveExpense(expense: Expense): Promise<Expense> {
     version: expense.version || 1,
     updatedAt: now,
     deletedAt: null,
-    userId: user.id,
+    userId: MASTER_SHARED_ACCOUNT_ID,
   };
 
   // Validate full expense object with Zod
@@ -61,9 +63,6 @@ export async function updateExpense(expense: Expense): Promise<Expense> {
 
   const now = new Date().toISOString();
   const existing = await db.expenses.get(expense.id);
-  if (existing && existing.userId && existing.userId !== user.id) {
-    throw new Error('Authorization Error: You do not have permission to modify another user\'s financial record.');
-  }
 
   const nextVersion = existing?.version ? existing.version + 1 : 1;
   const updatedExpense: Expense = {
@@ -72,7 +71,7 @@ export async function updateExpense(expense: Expense): Promise<Expense> {
     status: expense.status === 'REVERSED' ? 'REVERSED' : 'AMENDED',
     version: nextVersion,
     updatedAt: now,
-    userId: user.id,
+    userId: MASTER_SHARED_ACCOUNT_ID,
   };
 
   const validExp = ExpenseSchema.parse(updatedExpense);
@@ -91,10 +90,6 @@ export async function reverseExpense(id: string, reason: string = 'Correction / 
   const existing = await db.expenses.get(id);
 
   if (existing) {
-    if (existing.userId && existing.userId !== user.id) {
-      throw new Error('Authorization Error: You do not have permission to reverse another user\'s financial record.');
-    }
-
     const reversedExpense: Expense = {
       ...existing,
       status: 'REVERSED',
@@ -102,12 +97,18 @@ export async function reverseExpense(id: string, reason: string = 'Correction / 
       reversedAt: now,
       version: (existing.version || 1) + 1,
       updatedAt: now,
-      userId: user.id,
+      userId: MASTER_SHARED_ACCOUNT_ID,
     };
 
     const validExp = ExpenseSchema.parse(reversedExpense);
 
     await db.expenses.put(validExp);
+    await enqueueSyncOperation('expense', id, 'REVERSE', validExp, user.id);
+    triggerGitAutoSync('Reverse Expense');
+    return validExp;
+  }
+  return null;
+}
     await enqueueSyncOperation('expense', id, 'REVERSE', validExp, user.id);
     triggerGitAutoSync('Reverse Expense');
     return validExp;
