@@ -550,6 +550,65 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4 overflow-y-auto animate-fadeIn">
         {content}
+
+        {/* Google Account Recognition Modal */}
+        {showGooglePromptModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-lg p-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl relative">
+              <button
+                type="button"
+                onClick={() => setShowGooglePromptModal(false)}
+                className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-white bg-slate-800 rounded-full cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-2xl bg-white/10 border border-white/20">
+                  <GoogleIcon />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Google Account Sign-In</h3>
+                  <p className="text-[11px] text-slate-400">Specify your Google Email ID</p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold text-slate-300">
+                  Google Email Address
+                </label>
+                <input
+                  type="email"
+                  value={googleEmailInput}
+                  onChange={(e) => setGoogleEmailInput(e.target.value)}
+                  placeholder="your.email@gmail.com"
+                  className="w-full px-3.5 py-2 text-xs bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-indigo-500"
+                />
+                <p className="text-[10px] text-slate-400">
+                  Your profile details will be fetched and session initialized for this mail ID.
+                </p>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowGooglePromptModal(false)}
+                  className="flex-1 py-2 text-xs font-semibold text-slate-400 hover:text-white bg-slate-800 rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => executeGoogleSignInWithEmail(googleEmailInput)}
+                  disabled={isGoogleLoading || !googleEmailInput.trim()}
+                  className="flex-1 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl cursor-pointer disabled:opacity-50"
+                >
+                  {isGoogleLoading ? 'Signing In...' : 'Sign In'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -557,6 +616,65 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 selection:bg-indigo-500 selection:text-white">
       {content}
+
+      {/* Google Account Recognition Modal */}
+      {showGooglePromptModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-lg p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl relative">
+            <button
+              type="button"
+              onClick={() => setShowGooglePromptModal(false)}
+              className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-white bg-slate-800 rounded-full cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-2xl bg-white/10 border border-white/20">
+                <GoogleIcon />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Google Account Sign-In</h3>
+                <p className="text-[11px] text-slate-400">Specify your Google Email ID</p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-xs font-semibold text-slate-300">
+                Google Email Address
+              </label>
+              <input
+                type="email"
+                value={googleEmailInput}
+                onChange={(e) => setGoogleEmailInput(e.target.value)}
+                placeholder="your.email@gmail.com"
+                className="w-full px-3.5 py-2 text-xs bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-indigo-500"
+              />
+              <p className="text-[10px] text-slate-400">
+                Your profile details will be fetched and session initialized for this mail ID.
+              </p>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowGooglePromptModal(false)}
+                className="flex-1 py-2 text-xs font-semibold text-slate-400 hover:text-white bg-slate-800 rounded-xl cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => executeGoogleSignInWithEmail(googleEmailInput)}
+                disabled={isGoogleLoading || !googleEmailInput.trim()}
+                className="flex-1 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl cursor-pointer disabled:opacity-50"
+              >
+                {isGoogleLoading ? 'Signing In...' : 'Sign In'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
