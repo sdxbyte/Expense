@@ -18,26 +18,42 @@ export const OtpVerificationStep: React.FC<OtpVerificationStepProps> = ({
 }) => {
   const [channel, setChannel] = useState<'email' | 'phone'>('email');
   const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', '']);
-  const [generatedCode, setGeneratedCode] = useState<string>('');
   const [countdown, setCountdown] = useState<number>(60);
+  const [isSending, setIsSending] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [isCopied, setIsCopied] = useState(false);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  // Generate a random 6-digit OTP code on mount or resend
-  const generateNewOtp = (targetChannel: 'email' | 'phone' = channel) => {
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    setGeneratedCode(code);
-    setCountdown(60);
+  // Dispatch OTP via server API
+  const dispatchOtp = async (targetChannel: 'email' | 'phone' = channel) => {
+    setIsSending(true);
     setErrorMsg(null);
     setOtpDigits(['', '', '', '', '', '']);
-    setTimeout(() => {
-      inputRefs.current[0]?.focus();
-    }, 100);
+
+    try {
+      const res = await fetch('/api/auth/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, channel: targetChannel, phone }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setErrorMsg(data.error || 'Failed to dispatch verification code.');
+      } else {
+        setCountdown(60);
+        setTimeout(() => {
+          inputRefs.current[0]?.focus();
+        }, 100);
+      }
+    } catch {
+      setErrorMsg('Network error dispatching OTP code. Please check your connection.');
+    } finally {
+      setIsSending(false);
+    }
   };
 
   useEffect(() => {
-    generateNewOtp();
+    dispatchOtp();
   }, []);
 
   // Timer countdown effect
@@ -88,15 +104,6 @@ export const OtpVerificationStep: React.FC<OtpVerificationStepProps> = ({
     }
   };
 
-  const handleAutoFill = () => {
-    if (generatedCode.length === 6) {
-      setOtpDigits(generatedCode.split(''));
-      setIsCopied(true);
-      setTimeout(() => setIsCopied(false), 2000);
-      setErrorMsg(null);
-    }
-  };
-
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -107,13 +114,26 @@ export const OtpVerificationStep: React.FC<OtpVerificationStepProps> = ({
       return;
     }
 
-    if (enteredCode !== generatedCode) {
-      setErrorMsg('Invalid OTP verification code. Please check and try again or request a new code.');
-      return;
-    }
+    setIsVerifying(true);
 
-    // Code matched!
-    await onVerifySuccess();
+    try {
+      const res = await fetch('/api/auth/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code: enteredCode }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.verified) {
+        setErrorMsg(data.error || 'Invalid verification code. Please check your email and try again.');
+      } else {
+        await onVerifySuccess();
+      }
+    } catch {
+      setErrorMsg('Network error verifying passcode. Please try again.');
+    } finally {
+      setIsVerifying(false);
+    }
   };
 
   const maskEmail = (em: string) => {
@@ -142,7 +162,7 @@ export const OtpVerificationStep: React.FC<OtpVerificationStepProps> = ({
         </button>
         <span className="text-[11px] font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1">
           <ShieldCheck className="w-3.5 h-3.5" />
-          Step 2 of 2: OTP Verification
+          Identity Verification
         </span>
       </div>
 
@@ -156,8 +176,9 @@ export const OtpVerificationStep: React.FC<OtpVerificationStepProps> = ({
             type="button"
             onClick={() => {
               setChannel('email');
-              generateNewOtp('email');
+              dispatchOtp('email');
             }}
+            disabled={isSending}
             className={`py-2 px-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
               channel === 'email'
                 ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
@@ -172,8 +193,9 @@ export const OtpVerificationStep: React.FC<OtpVerificationStepProps> = ({
             type="button"
             onClick={() => {
               setChannel('phone');
-              generateNewOtp('phone');
+              dispatchOtp('phone');
             }}
+            disabled={isSending}
             className={`py-2 px-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
               channel === 'phone'
                 ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
@@ -186,32 +208,20 @@ export const OtpVerificationStep: React.FC<OtpVerificationStepProps> = ({
         </div>
       </div>
 
-      {/* OTP Dispatch Banner with Code */}
-      <div className="bg-indigo-950/60 border border-indigo-800/80 rounded-2xl p-3.5 space-y-2">
+      {/* OTP Dispatch Banner */}
+      <div className="bg-indigo-950/60 border border-indigo-800/80 rounded-2xl p-3.5 space-y-1">
         <div className="flex items-start gap-2 text-xs text-indigo-200">
           <CheckCircle2 className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
           <div>
-            <span>OTP Code dispatched to </span>
+            <span>6-Digit passcode sent to </span>
             <strong className="text-white font-mono">
-              {channel === 'email' ? maskEmail(email) : maskPhone(phone)}
+              {channel === 'email' ? maskEmail(email) : maskPhone(phone || email)}
             </strong>
           </div>
         </div>
-
-        {/* Display generated code for user convenience */}
-        <div className="flex items-center justify-between bg-slate-950/80 px-3 py-2 rounded-xl border border-indigo-500/30">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider">Verification OTP:</span>
-            <span className="text-base font-black tracking-widest text-emerald-400 font-mono">{generatedCode}</span>
-          </div>
-          <button
-            type="button"
-            onClick={handleAutoFill}
-            className="text-[10px] font-bold px-2 py-1 bg-indigo-600/80 hover:bg-indigo-600 text-white rounded-lg transition-colors cursor-pointer"
-          >
-            {isCopied ? 'Auto-filled!' : 'Auto-fill'}
-          </button>
-        </div>
+        <p className="text-[11px] text-slate-400 pl-6 leading-relaxed">
+          Please check your inbox or mobile device for the 6-digit security code and type it below to confirm identity.
+        </p>
       </div>
 
       {/* Error Message */}
@@ -226,7 +236,7 @@ export const OtpVerificationStep: React.FC<OtpVerificationStepProps> = ({
       <form onSubmit={handleVerify} className="space-y-4">
         <div>
           <label className="block text-xs font-semibold text-slate-300 mb-2 text-center">
-            Enter 6-Digit Verification Code
+            Enter 6-Digit Verification Passcode
           </label>
           <div className="flex justify-center gap-2">
             {otpDigits.map((digit, idx) => (
@@ -250,7 +260,7 @@ export const OtpVerificationStep: React.FC<OtpVerificationStepProps> = ({
         <div className="flex items-center justify-between text-xs text-slate-400 px-1">
           <span>
             {countdown > 0 ? (
-              <span>Resend available in <strong className="text-indigo-400 font-mono">{countdown}s</strong></span>
+              <span>Resend code in <strong className="text-indigo-400 font-mono">{countdown}s</strong></span>
             ) : (
               <span className="text-emerald-400 font-semibold">Code expired</span>
             )}
@@ -258,26 +268,26 @@ export const OtpVerificationStep: React.FC<OtpVerificationStepProps> = ({
 
           <button
             type="button"
-            disabled={countdown > 0}
-            onClick={() => generateNewOtp()}
+            disabled={countdown > 0 || isSending}
+            onClick={() => dispatchOtp()}
             className="flex items-center gap-1 font-semibold text-indigo-400 hover:text-indigo-300 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
           >
-            <RefreshCw className="w-3 h-3" />
-            <span>Resend Code</span>
+            <RefreshCw className={`w-3 h-3 ${isSending ? 'animate-spin' : ''}`} />
+            <span>{isSending ? 'Sending...' : 'Resend Code'}</span>
           </button>
         </div>
 
         {/* Submit Verification Button */}
         <button
           type="submit"
-          disabled={isLoading || otpDigits.join('').length < 6}
+          disabled={isLoading || isVerifying || otpDigits.join('').length < 6}
           className="w-full py-2.5 px-4 bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white font-bold text-xs rounded-xl shadow-lg shadow-indigo-500/25 border border-white/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
         >
-          {isLoading ? (
-            <span className="animate-pulse">Creating Verified Account...</span>
+          {isVerifying || isLoading ? (
+            <span className="animate-pulse">Verifying Code...</span>
           ) : (
             <>
-              <span>Verify & Complete Registration</span>
+              <span>Verify & Complete Access</span>
               <ArrowRight className="w-4 h-4" />
             </>
           )}

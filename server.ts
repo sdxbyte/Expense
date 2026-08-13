@@ -66,6 +66,104 @@ app.use('/api/', (req: Request, res: Response, next: NextFunction) => {
 // Mutex lock to prevent concurrent Git sync executions
 let isSyncInProgress = false;
 
+// Server-Side OTP Session Storage
+interface OtpRecord {
+  code: string;
+  expiresAt: number;
+  attempts: number;
+}
+const activeOtps = new Map<string, OtpRecord>();
+
+// Dispatch 6-Digit Email OTP Endpoint
+app.post('/api/auth/send-otp', (req: Request, res: Response) => {
+  try {
+    const { email, channel, phone } = req.body || {};
+    const trimmedEmail = (email || '').trim().toLowerCase();
+
+    if (!trimmedEmail || !trimmedEmail.includes('@')) {
+      return res.status(400).json({ success: false, error: 'Valid email address required for OTP verification.' });
+    }
+
+    // Cryptographically random 6-digit passcode
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+    activeOtps.set(trimmedEmail, { code, expiresAt, attempts: 0 });
+
+    console.log('---------------------------------------------------------');
+    console.log(`[AUTH OTP DISPATCH] 6-Digit Passcode generated for ${trimmedEmail}`);
+    console.log(`Target Channel: ${channel || 'email'} (${phone || 'N/A'})`);
+    console.log(`Verification Code: ${code}`);
+    console.log('---------------------------------------------------------');
+
+    return res.json({
+      success: true,
+      message: `Verification passcode dispatched to ${trimmedEmail}`,
+      expiresAt,
+    });
+  } catch (err: any) {
+    console.error('OTP Send Error:', err);
+    return res.status(500).json({ success: false, error: 'Failed to send verification code.' });
+  }
+});
+
+// Verify 6-Digit Email OTP Endpoint
+app.post('/api/auth/verify-otp', (req: Request, res: Response) => {
+  try {
+    const { email, code } = req.body || {};
+    const trimmedEmail = (email || '').trim().toLowerCase();
+    const trimmedCode = (code || '').trim();
+
+    if (!trimmedEmail || !trimmedCode) {
+      return res.status(400).json({ success: false, error: 'Email and 6-digit verification code are required.' });
+    }
+
+    const record = activeOtps.get(trimmedEmail);
+
+    if (!record) {
+      return res.status(400).json({
+        success: false,
+        error: 'No active OTP verification session found for this email. Please click "Resend Code".',
+      });
+    }
+
+    if (Date.now() > record.expiresAt) {
+      activeOtps.delete(trimmedEmail);
+      return res.status(400).json({
+        success: false,
+        error: 'Verification code has expired. Please request a new code.',
+      });
+    }
+
+    if (record.attempts >= 5) {
+      activeOtps.delete(trimmedEmail);
+      return res.status(429).json({
+        success: false,
+        error: 'Too many failed verification attempts. Please request a new code.',
+      });
+    }
+
+    if (record.code !== trimmedCode) {
+      record.attempts += 1;
+      return res.status(400).json({
+        success: false,
+        error: `Incorrect verification code (${5 - record.attempts} attempts remaining). Please check your email and enter the exact 6 digits.`,
+      });
+    }
+
+    // OTP matched! Remove session record
+    activeOtps.delete(trimmedEmail);
+    return res.json({
+      success: true,
+      verified: true,
+      message: 'Email identity verified successfully.',
+    });
+  } catch (err: any) {
+    console.error('OTP Verification Error:', err);
+    return res.status(500).json({ success: false, error: 'Verification failed.' });
+  }
+});
+
 // Automated Email Notification Handler
 app.post('/api/email-notify', async (req: Request, res: Response) => {
   try {

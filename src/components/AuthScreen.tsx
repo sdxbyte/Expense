@@ -65,6 +65,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
   const [showGooglePromptModal, setShowGooglePromptModal] = useState(false);
   const [googleEmailInput, setGoogleEmailInput] = useState('');
+  const [pendingAuthAction, setPendingAuthAction] = useState<'LOGIN' | 'SIGNUP' | 'GOOGLE'>('SIGNUP');
 
   // Listen for Google OAuth popup response
   useEffect(() => {
@@ -130,7 +131,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     try {
       const client = getSupabaseClient();
       if (client && typeof client.auth.signInWithGoogleUser === 'function') {
-        // Format name dynamically from email prefix
         const emailPrefix = trimmedEmail.split('@')[0];
         const formattedName = emailPrefix
           .replace(/[._\-\d]+/g, ' ')
@@ -153,8 +153,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         if (error) {
           setErrorMsg(error.message);
         } else if (authData.user) {
-          setSuccessMsg(`Recognized Google Identity (${trimmedEmail})! Loading ledger...`);
+          setSuccessMsg(`Verified & Recognized Google Identity (${trimmedEmail})! Loading ledger...`);
           setShowGooglePromptModal(false);
+          setShowOtpStep(false);
           setTimeout(() => {
             onAuthenticated(authData.user!);
           }, 300);
@@ -169,13 +170,25 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     }
   };
 
+  const handleStartGoogleSignInModal = (targetEmail: string) => {
+    const trimmedEmail = targetEmail.trim().toLowerCase();
+    if (!trimmedEmail || !trimmedEmail.includes('@')) {
+      setErrorMsg('Please enter a valid email address.');
+      return;
+    }
+    setEmail(trimmedEmail);
+    setPendingAuthAction('GOOGLE');
+    setShowGooglePromptModal(false);
+    setShowOtpStep(true);
+  };
+
   const handleGoogleSignIn = async () => {
     setErrorMsg(null);
     setSuccessMsg(null);
 
-    // If an email is already typed in the email field, use it directly
     if (email && email.includes('@')) {
-      await executeGoogleSignInWithEmail(email);
+      setPendingAuthAction('GOOGLE');
+      setShowOtpStep(true);
       return;
     }
 
@@ -186,7 +199,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       const data = res ? await res.json().catch(() => null) : null;
 
       if (data && data.configured && data.url) {
-        // Open Google OAuth Provider URL in popup window directly
         const authWindow = window.open(
           data.url,
           'google_oauth_popup',
@@ -198,7 +210,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         }
       }
 
-      // Show Google Account Selector Modal to recognize user's specific mail ID
       setShowGooglePromptModal(true);
       setGoogleEmailInput(email.trim() || '');
     } catch (err: any) {
@@ -227,7 +238,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const handleCompleteSignUp = async () => {
     const client = getSupabaseClient();
     if (!client) {
-      setErrorMsg('Authentication service is currently unavailable. Please contact the administrator or try again later.');
+      setErrorMsg('Authentication service is currently unavailable.');
       return;
     }
 
@@ -250,7 +261,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         setErrorMsg(error.message);
         setShowOtpStep(false);
       } else if (data.user) {
-        setSuccessMsg('OTP verified & account created successfully!');
+        setSuccessMsg('Email verified & account registered successfully!');
         setTimeout(() => {
           onAuthenticated(data.user!);
         }, 500);
@@ -260,6 +271,49 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       setShowOtpStep(false);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleCompleteSignIn = async () => {
+    const client = getSupabaseClient();
+    if (!client) {
+      setErrorMsg('Authentication service is currently unavailable.');
+      return;
+    }
+
+    setIsLoading(true);
+    setErrorMsg(null);
+
+    try {
+      const { data, error } = await client.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (error) {
+        setErrorMsg(error.message);
+        setShowOtpStep(false);
+      } else if (data.user) {
+        setSuccessMsg('2FA verified successfully! Loading your financial vault...');
+        setTimeout(() => {
+          onAuthenticated(data.user!);
+        }, 400);
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Authentication failed.');
+      setShowOtpStep(false);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleVerifySuccessAction = async () => {
+    if (pendingAuthAction === 'SIGNUP') {
+      await handleCompleteSignUp();
+    } else if (pendingAuthAction === 'LOGIN') {
+      await handleCompleteSignIn();
+    } else if (pendingAuthAction === 'GOOGLE') {
+      await executeGoogleSignInWithEmail(email);
     }
   };
 
@@ -293,6 +347,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       }
 
       // Proceed to OTP Verification Step
+      setPendingAuthAction('SIGNUP');
       setShowOtpStep(true);
       return;
     } else {
@@ -300,34 +355,35 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         setErrorMsg('Please enter your password.');
         return;
       }
-    }
 
-    const client = getSupabaseClient();
-    if (!client) {
-      setErrorMsg('Authentication service is currently unavailable. Please contact the administrator or try again later.');
-      return;
-    }
-
-    setIsLoading(true);
-
-    try {
-      const { data, error } = await client.auth.signInWithPassword({
-        email: trimmedEmail,
-        password,
-      });
-
-      if (error) {
-        setErrorMsg(error.message);
-      } else if (data.user) {
-        setSuccessMsg('Sign in successful! Loading your financial vault...');
-        setTimeout(() => {
-          onAuthenticated(data.user!);
-        }, 300);
+      // Validate credentials first before sending OTP
+      const client = getSupabaseClient();
+      if (!client) {
+        setErrorMsg('Authentication service is currently unavailable.');
+        return;
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'An unexpected authentication error occurred.');
-    } finally {
-      setIsLoading(false);
+
+      setIsLoading(true);
+      try {
+        const { error } = await client.auth.signInWithPassword({
+          email: trimmedEmail,
+          password,
+        });
+
+        if (error) {
+          setErrorMsg(error.message);
+          setIsLoading(false);
+          return;
+        }
+
+        // Password matches! Require 2FA OTP Email Verification
+        setPendingAuthAction('LOGIN');
+        setShowOtpStep(true);
+      } catch (err: any) {
+        setErrorMsg(err.message || 'Sign in error.');
+      } finally {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -367,7 +423,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             phone={phone}
             isLoading={isLoading}
             onCancel={() => setShowOtpStep(false)}
-            onVerifySuccess={handleCompleteSignUp}
+            onVerifySuccess={handleVerifySuccessAction}
           />
         ) : (
           <>
@@ -599,7 +655,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => executeGoogleSignInWithEmail(googleEmailInput)}
+                  onClick={() => handleStartGoogleSignInModal(googleEmailInput)}
                   disabled={isGoogleLoading || !googleEmailInput.trim()}
                   className="flex-1 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl cursor-pointer disabled:opacity-50"
                 >
