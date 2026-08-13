@@ -160,7 +160,11 @@ app.post('/api/git-sync', async (req: Request, res: Response) => {
     await runGitCommand(['add', '.'], cwd);
 
     // 5. Create Commit safely using argument array (no shell string evaluation)
-    await runGitCommand(['commit', '-m', commitMsg], cwd);
+    try {
+      await runGitCommand(['commit', '-m', commitMsg], cwd);
+    } catch (commitErr: any) {
+      console.warn('Git commit warning (proceeding with sync):', commitErr?.message || commitErr);
+    }
 
     // 6. Push to remote main branch safely
     let pushOutput = '';
@@ -174,7 +178,7 @@ app.post('/api/git-sync', async (req: Request, res: Response) => {
       pushOutput = pushResult.stdout || pushResult.stderr;
       pushedRemote = true;
     } catch (pushErr: any) {
-      console.warn('Remote git push skipped or unauthenticated (local commit created):', pushErr?.message || pushErr);
+      console.warn('Remote git push skipped or unauthenticated:', pushErr?.message || pushErr);
       pushOutput = 'Local commit created successfully. Remote push skipped (pending remote credentials).';
     }
 

@@ -29,7 +29,11 @@ export function runGitCommand(args: string[], cwd: string = process.cwd()): Prom
   return new Promise((resolve, reject) => {
     execFile('git', args, { cwd, env: process.env }, (error, stdout, stderr) => {
       if (error) {
-        reject({ error, stdout, stderr });
+        const errObj = new Error(error.message || stderr || 'Git execution failed');
+        (errObj as any).stdout = stdout;
+        (errObj as any).stderr = stderr;
+        (errObj as any).code = (error as any).code;
+        reject(errObj);
       } else {
         resolve({ stdout, stderr });
       }
