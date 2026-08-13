@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 
 // In-memory short-lived state cache to prevent OAuth CSRF attacks and store PKCE code_verifier
 interface OAuthStateRecord {
@@ -36,19 +38,34 @@ function getRedirectUri(req: Request): string {
 }
 
 /**
- * Resolves Google Client ID and Client Secret from available server environment variables
+ * Resolves Google Client ID and Client Secret from environment or firebase config file
  */
 function getGoogleCredentials() {
-  const clientId =
+  let clientId =
     process.env.GOOGLE_CLIENT_ID ||
     process.env.CLIENT_ID ||
     process.env.GMAIL_CLIENT_ID ||
     '';
-  const clientSecret =
+  let clientSecret =
     process.env.GOOGLE_CLIENT_SECRET ||
     process.env.CLIENT_SECRET ||
     process.env.GMAIL_CLIENT_SECRET ||
     '';
+
+  if (!clientId) {
+    try {
+      const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+      if (fs.existsSync(configPath)) {
+        const configData = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        if (configData.oAuthClientId) {
+          clientId = configData.oAuthClientId;
+        }
+      }
+    } catch (e) {
+      // Ignore reading error
+    }
+  }
+
   return { clientId, clientSecret };
 }
 
@@ -253,28 +270,32 @@ export async function handleGoogleOAuthCallback(req: Request, res: Response) {
 
   const { clientId, clientSecret } = getGoogleCredentials();
 
-  if (!clientId || !clientSecret) {
+  if (!clientId) {
     return sendPopupResponse({
       type: 'GOOGLE_AUTH_ERROR',
-      error: 'Google Sign-In server credentials missing. Please configure GOOGLE_CLIENT_SECRET in server settings.',
+      error: 'Google Sign-In server credentials missing.',
     });
   }
 
   try {
+    const tokenParams: Record<string, string> = {
+      code: code as string,
+      client_id: clientId,
+      redirect_uri: stateData.redirectUri,
+      grant_type: 'authorization_code',
+      code_verifier: stateData.codeVerifier,
+    };
+    if (clientSecret) {
+      tokenParams.client_secret = clientSecret;
+    }
+
     // 1. Exchange authorization code for Google access token & ID token with PKCE verification
     const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: new URLSearchParams({
-        code: code as string,
-        client_id: clientId,
-        client_secret: clientSecret,
-        redirect_uri: stateData.redirectUri,
-        grant_type: 'authorization_code',
-        code_verifier: stateData.codeVerifier,
-      }),
+      body: new URLSearchParams(tokenParams),
     });
 
     if (!tokenResponse.ok) {
