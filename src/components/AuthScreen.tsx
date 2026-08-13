@@ -63,8 +63,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  const [showGooglePromptModal, setShowGooglePromptModal] = useState(false);
-  const [googleEmailInput, setGoogleEmailInput] = useState('');
   const [pendingAuthAction, setPendingAuthAction] = useState<'LOGIN' | 'SIGNUP'>('SIGNUP');
 
   // Listen for Google OAuth popup response
@@ -73,7 +71,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       if (event.data?.type === 'GOOGLE_AUTH_SUCCESS') {
         const { user: googleUser } = event.data;
         if (!googleUser || !googleUser.email) {
-          setErrorMsg('Failed to receive Google profile data.');
+          setErrorMsg('Failed to receive verified Google profile data.');
           setIsGoogleLoading(false);
           return;
         }
@@ -93,7 +91,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             if (error) {
               setErrorMsg(error.message);
             } else if (data.user) {
-              setSuccessMsg(`Signed in with Google as ${googleUser.email}!`);
+              setSuccessMsg(`Signed in with Google as ${googleUser.email}! Loading ledger vault...`);
               setTimeout(() => {
                 onAuthenticated(data.user!);
               }, 400);
@@ -107,7 +105,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           setIsGoogleLoading(false);
         }
       } else if (event.data?.type === 'GOOGLE_AUTH_ERROR') {
-        setErrorMsg(event.data.error || 'Google authentication was canceled.');
+        setErrorMsg(event.data.error || 'Google authentication was canceled or access was denied.');
         setIsGoogleLoading(false);
       }
     };
@@ -118,99 +116,36 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
   if (!isOpen) return null;
 
-  const executeGoogleSignInWithEmail = async (targetEmail: string) => {
-    const trimmedEmail = targetEmail.trim().toLowerCase();
-    if (!trimmedEmail || !trimmedEmail.includes('@')) {
-      setErrorMsg('Please enter a valid Google email address.');
-      return;
-    }
-
-    setIsGoogleLoading(true);
-    setErrorMsg(null);
-
-    try {
-      const client = getSupabaseClient();
-      if (client && typeof client.auth.signInWithGoogleUser === 'function') {
-        const emailPrefix = trimmedEmail.split('@')[0];
-        const formattedName = emailPrefix
-          .replace(/[._\-\d]+/g, ' ')
-          .trim()
-          .split(' ')
-          .filter(Boolean)
-          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-          .join(' ') || 'Google User';
-
-        const googleSub = 'g_' + btoa(trimmedEmail).substring(0, 16).replace(/[^a-zA-Z0-9]/g, 'x');
-        const googleUserPic = `https://ui-avatars.com/api/?name=${encodeURIComponent(formattedName)}&background=6366f1&color=fff&rounded=true`;
-
-        const { data: authData, error } = await client.auth.signInWithGoogleUser({
-          email: trimmedEmail,
-          name: formattedName,
-          sub: googleSub,
-          picture: googleUserPic,
-        });
-
-        if (error) {
-          setErrorMsg(error.message);
-        } else if (authData.user) {
-          setSuccessMsg(`Verified & Recognized Google Identity (${trimmedEmail})! Loading ledger...`);
-          setShowGooglePromptModal(false);
-          setShowOtpStep(false);
-          setTimeout(() => {
-            onAuthenticated(authData.user!);
-          }, 300);
-        }
-      } else {
-        setErrorMsg('Authentication client is unavailable.');
-      }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Error completing Google sign in.');
-    } finally {
-      setIsGoogleLoading(false);
-    }
-  };
-
-  const handleStartGoogleSignInModal = async (targetEmail: string) => {
-    const trimmedEmail = targetEmail.trim().toLowerCase();
-    if (!trimmedEmail || !trimmedEmail.includes('@')) {
-      setErrorMsg('Please enter a valid Google email address.');
-      return;
-    }
-    await executeGoogleSignInWithEmail(trimmedEmail);
-  };
-
   const handleGoogleSignIn = async () => {
     setErrorMsg(null);
     setSuccessMsg(null);
-
-    if (email && email.trim().includes('@')) {
-      await executeGoogleSignInWithEmail(email);
-      return;
-    }
-
     setIsGoogleLoading(true);
 
     try {
       const res = await fetch('/api/auth/google/url').catch(() => null);
       const data = res ? await res.json().catch(() => null) : null;
 
-      if (data && data.configured && data.url) {
+      if (data && data.success && data.configured && data.url) {
+        // Open official Google OAuth Authorization URL in popup
         const authWindow = window.open(
           data.url,
           'google_oauth_popup',
           'width=550,height=650,top=100,left=200,scrollbars=yes,status=yes'
         );
 
-        if (authWindow) {
-          return;
+        if (!authWindow) {
+          // If popup is blocked by browser, fallback to full page redirect to Google
+          window.location.href = data.url;
         }
+      } else {
+        const redirectUri = data?.redirectUri || `${window.location.origin}/api/auth/google/callback`;
+        setErrorMsg(
+          `Google Sign-In requires GOOGLE_CLIENT_ID & GOOGLE_CLIENT_SECRET environment variables. Authorized Redirect URI: ${redirectUri}`
+        );
+        setIsGoogleLoading(false);
       }
-
-      setShowGooglePromptModal(true);
-      setGoogleEmailInput(email.trim() || '');
     } catch (err: any) {
       setErrorMsg(err.message || 'Error initializing Google sign in.');
-    } finally {
       setIsGoogleLoading(false);
     }
   };
@@ -458,7 +393,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               </button>
             </div>
 
-            {/* Google Sign-In Button */}
+            {/* Official Google OAuth Sign-In Button */}
             <button
               type="button"
               onClick={handleGoogleSignIn}
@@ -469,7 +404,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               {isGoogleLoading ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-                  <span>Connecting to Google...</span>
+                  <span>Redirecting to Google...</span>
                 </>
               ) : (
                 <>
@@ -491,7 +426,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             {errorMsg && (
               <div className="p-3.5 rounded-2xl bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs flex items-start gap-2.5">
                 <AlertCircle className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
-                <span>{errorMsg}</span>
+                <span className="break-words">{errorMsg}</span>
               </div>
             )}
 
@@ -589,76 +524,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         )}
       </div>
 
-        {/* Security Notice Footer */}
-        <div className="text-center text-[11px] text-slate-400 leading-relaxed px-2">
-          Your financial data is private, encrypted, and accessible only to your authorized account.
-        </div>
+      {/* Security Notice Footer */}
+      <div className="text-center text-[11px] text-slate-400 leading-relaxed px-2">
+        Your financial data is private, encrypted, and accessible only to your authorized account.
       </div>
+    </div>
   );
 
   if (onClose) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4 overflow-y-auto animate-fadeIn">
         {content}
-
-        {/* Google Account Recognition Modal */}
-        {showGooglePromptModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-lg p-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl relative">
-              <button
-                type="button"
-                onClick={() => setShowGooglePromptModal(false)}
-                className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-white bg-slate-800 rounded-full cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 rounded-2xl bg-white/10 border border-white/20">
-                  <GoogleIcon />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white">Google Account Sign-In</h3>
-                  <p className="text-[11px] text-slate-400">Specify your Google Email ID</p>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label className="block text-xs font-semibold text-slate-300">
-                  Google Email Address
-                </label>
-                <input
-                  type="email"
-                  value={googleEmailInput}
-                  onChange={(e) => setGoogleEmailInput(e.target.value)}
-                  placeholder="your.email@gmail.com"
-                  className="w-full px-3.5 py-2 text-xs bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-indigo-500"
-                />
-                <p className="text-[10px] text-slate-400">
-                  Your profile details will be fetched and session initialized for this mail ID.
-                </p>
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowGooglePromptModal(false)}
-                  className="flex-1 py-2 text-xs font-semibold text-slate-400 hover:text-white bg-slate-800 rounded-xl cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleStartGoogleSignInModal(googleEmailInput)}
-                  disabled={isGoogleLoading || !googleEmailInput.trim()}
-                  className="flex-1 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl cursor-pointer disabled:opacity-50"
-                >
-                  {isGoogleLoading ? 'Signing In...' : 'Sign In'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     );
   }
@@ -666,65 +542,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 selection:bg-indigo-500 selection:text-white">
       {content}
-
-      {/* Google Account Recognition Modal */}
-      {showGooglePromptModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-lg p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl relative">
-            <button
-              type="button"
-              onClick={() => setShowGooglePromptModal(false)}
-              className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-white bg-slate-800 rounded-full cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-2xl bg-white/10 border border-white/20">
-                <GoogleIcon />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-white">Google Account Sign-In</h3>
-                <p className="text-[11px] text-slate-400">Specify your Google Email ID</p>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-xs font-semibold text-slate-300">
-                Google Email Address
-              </label>
-              <input
-                type="email"
-                value={googleEmailInput}
-                onChange={(e) => setGoogleEmailInput(e.target.value)}
-                placeholder="your.email@gmail.com"
-                className="w-full px-3.5 py-2 text-xs bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-indigo-500"
-              />
-              <p className="text-[10px] text-slate-400">
-                Your profile details will be fetched and session initialized for this mail ID.
-              </p>
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowGooglePromptModal(false)}
-                className="flex-1 py-2 text-xs font-semibold text-slate-400 hover:text-white bg-slate-800 rounded-xl cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => executeGoogleSignInWithEmail(googleEmailInput)}
-                disabled={isGoogleLoading || !googleEmailInput.trim()}
-                className="flex-1 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl cursor-pointer disabled:opacity-50"
-              >
-                {isGoogleLoading ? 'Signing In...' : 'Sign In'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

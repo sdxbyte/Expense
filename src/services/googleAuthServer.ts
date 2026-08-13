@@ -1,8 +1,14 @@
 import { Request, Response } from 'express';
 import crypto from 'crypto';
 
-// In-memory short-lived state cache to prevent OAuth CSRF attacks
-const activeStates = new Map<string, { createdAt: number; redirectUri: string }>();
+// In-memory short-lived state cache to prevent OAuth CSRF attacks and store PKCE code_verifier
+interface OAuthStateRecord {
+  createdAt: number;
+  redirectUri: string;
+  codeVerifier: string;
+}
+
+const activeStates = new Map<string, OAuthStateRecord>();
 
 // Periodic cleanup of expired state entries (older than 10 minutes)
 setInterval(() => {
@@ -14,37 +20,64 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000);
 
+/**
+ * Helper to determine current dynamic base redirect URI
+ */
+function getRedirectUri(req: Request): string {
+  if (process.env.GOOGLE_REDIRECT_URI) {
+    return process.env.GOOGLE_REDIRECT_URI;
+  }
+  const appUrl = process.env.APP_URL ? process.env.APP_URL.replace(/\/$/, '') : '';
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+  const host = req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000';
+
+  const baseUrl = appUrl || `${protocol}://${host}`;
+  return `${baseUrl}/api/auth/google/callback`;
+}
+
+/**
+ * Generates official Google OAuth 2.0 authorization URL with PKCE (S256)
+ */
 export function getGoogleOAuthUrl(req: Request, res: Response) {
   try {
     const clientId = process.env.GOOGLE_CLIENT_ID;
+    const redirectUri = getRedirectUri(req);
+
     if (!clientId) {
       return res.json({
-        success: true,
+        success: false,
         configured: false,
         url: null,
-        message: 'Google Sign-In client ID is not configured in server environment variables.',
+        redirectUri,
+        message: 'Google Sign-In GOOGLE_CLIENT_ID is not configured in server environment variables.',
       });
     }
 
-    // Determine absolute redirect URI dynamically
-    const appUrl = process.env.APP_URL ? process.env.APP_URL.replace(/\/$/, '') : '';
-    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-    const host = req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000';
-    
-    const fallbackOrigin = `${protocol}://${host}`;
-    const baseUrl = appUrl || fallbackOrigin;
-    const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${baseUrl}/api/auth/google/callback`;
+    // 1. Generate crypto-random state for OAuth CSRF protection
+    const state = crypto.randomBytes(32).toString('hex');
 
-    // Generate crypto-random state for OAuth CSRF protection
-    const state = crypto.randomBytes(24).toString('hex');
-    activeStates.set(state, { createdAt: Date.now(), redirectUri });
+    // 2. Generate PKCE code_verifier (high-entropy cryptographic random string)
+    const codeVerifier = crypto.randomBytes(32).toString('base64url');
 
+    // 3. Generate PKCE code_challenge = BASE64URL-ENCODE(SHA256(code_verifier))
+    const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+
+    // Store state and codeVerifier in server session cache
+    activeStates.set(state, {
+      createdAt: Date.now(),
+      redirectUri,
+      codeVerifier,
+    });
+
+    // 4. Construct official Google authorization URL (accounts.google.com)
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: redirectUri,
       response_type: 'code',
       scope: 'openid email profile',
       state: state,
+      code_challenge: codeChallenge,
+      code_challenge_method: 'S256',
       prompt: 'select_account',
     });
 
@@ -52,6 +85,7 @@ export function getGoogleOAuthUrl(req: Request, res: Response) {
 
     return res.json({
       success: true,
+      configured: true,
       url,
       redirectUri,
     });
@@ -59,15 +93,62 @@ export function getGoogleOAuthUrl(req: Request, res: Response) {
     console.error('Error generating Google OAuth URL:', err);
     return res.status(500).json({
       success: false,
+      configured: false,
       error: 'Failed to generate Google Sign-In authorization URL.',
     });
   }
 }
 
+/**
+ * Decodes and verifies Google ID Token payload
+ */
+function verifyGoogleIdToken(idToken: string, expectedClientId: string) {
+  if (!idToken) {
+    throw new Error('No Google ID token provided in token response.');
+  }
+
+  const parts = idToken.split('.');
+  if (parts.length !== 3) {
+    throw new Error('Malformed Google ID token format.');
+  }
+
+  // Parse JWT Payload
+  const payloadJson = Buffer.from(parts[1], 'base64url').toString('utf8');
+  const payload = JSON.parse(payloadJson);
+
+  const now = Math.floor(Date.now() / 1000);
+
+  // 1. Verify Issuer
+  const validIssuers = ['https://accounts.google.com', 'accounts.google.com'];
+  if (!validIssuers.includes(payload.iss)) {
+    throw new Error(`Invalid Google ID token issuer: ${payload.iss}`);
+  }
+
+  // 2. Verify Audience (Client ID)
+  if (payload.aud !== expectedClientId) {
+    throw new Error(`Google ID token audience mismatch. Expected ${expectedClientId}, got ${payload.aud}`);
+  }
+
+  // 3. Verify Expiration
+  if (payload.exp && payload.exp < now) {
+    throw new Error('Google ID token has expired.');
+  }
+
+  // 4. Verify Email Status
+  if (payload.email_verified === false) {
+    throw new Error('Google account email is not verified by Google.');
+  }
+
+  return payload;
+}
+
+/**
+ * OAuth Callback Handler: Exchanges code for tokens, verifies Google ID Token & UserInfo
+ */
 export async function handleGoogleOAuthCallback(req: Request, res: Response) {
   const { code, state, error: googleError } = req.query;
 
-  // Render helper for sending postMessage to popup opener
+  // Render helper for sending postMessage to popup opener or fallback redirect
   const sendPopupResponse = (payload: { type: string; user?: any; error?: string }) => {
     const jsonPayload = JSON.stringify(payload);
     res.send(`
@@ -97,11 +178,18 @@ export async function handleGoogleOAuthCallback(req: Request, res: Response) {
               margin-bottom: 16px;
             }
             @keyframes spin { to { transform: rotate(360deg); } }
+            .msg {
+              font-size: 14px;
+              font-weight: 500;
+              color: ${payload.error ? '#f87171' : '#a5b4fc'};
+              text-align: center;
+              padding: 0 16px;
+            }
           </style>
         </head>
         <body>
           <div class="spinner"></div>
-          <p>${payload.error ? 'Authentication failed. Closing window...' : 'Completing Google Sign-In...'}</p>
+          <p class="msg">${payload.error ? payload.error : 'Google Sign-In verified! Redirecting to Expense vault...'}</p>
           <script>
             try {
               if (window.opener) {
@@ -120,18 +208,19 @@ export async function handleGoogleOAuthCallback(req: Request, res: Response) {
     `);
   };
 
+  // User canceled or denied access on Google login page
   if (googleError) {
     console.warn('Google OAuth error callback:', googleError);
     return sendPopupResponse({
       type: 'GOOGLE_AUTH_ERROR',
-      error: 'Google authentication was canceled or declined.',
+      error: 'Google authentication was canceled or access was denied.',
     });
   }
 
   if (!code || !state || typeof state !== 'string') {
     return sendPopupResponse({
       type: 'GOOGLE_AUTH_ERROR',
-      error: 'Invalid authorization request parameters.',
+      error: 'Invalid authorization callback parameters.',
     });
   }
 
@@ -140,10 +229,10 @@ export async function handleGoogleOAuthCallback(req: Request, res: Response) {
   if (!stateData) {
     return sendPopupResponse({
       type: 'GOOGLE_AUTH_ERROR',
-      error: 'Authentication state expired or invalid. Please try signing in again.',
+      error: 'Authentication state expired or invalid CSRF token. Please try signing in again.',
     });
   }
-  activeStates.delete(state); // Prevent state replay attacks
+  activeStates.delete(state); // Prevent replay attacks
 
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
@@ -151,12 +240,12 @@ export async function handleGoogleOAuthCallback(req: Request, res: Response) {
   if (!clientId || !clientSecret) {
     return sendPopupResponse({
       type: 'GOOGLE_AUTH_ERROR',
-      error: 'Google Sign-In server credentials are missing. Please configure GOOGLE_CLIENT_SECRET.',
+      error: 'Google Sign-In server credentials missing. Please configure GOOGLE_CLIENT_SECRET in server settings.',
     });
   }
 
   try {
-    // 1. Exchange authorization code for Google access token & ID token
+    // 1. Exchange authorization code for Google access token & ID token with PKCE verification
     const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: {
@@ -168,6 +257,7 @@ export async function handleGoogleOAuthCallback(req: Request, res: Response) {
         client_secret: clientSecret,
         redirect_uri: stateData.redirectUri,
         grant_type: 'authorization_code',
+        code_verifier: stateData.codeVerifier,
       }),
     });
 
@@ -176,21 +266,24 @@ export async function handleGoogleOAuthCallback(req: Request, res: Response) {
       console.error('Google token exchange failed:', errBody);
       return sendPopupResponse({
         type: 'GOOGLE_AUTH_ERROR',
-        error: 'Failed to verify authorization code with Google.',
+        error: 'Failed to verify authorization code with Google token service.',
       });
     }
 
     const tokenData = await tokenResponse.json();
-    const accessToken = tokenData.access_token;
+    const { access_token: accessToken, id_token: idToken } = tokenData;
 
-    if (!accessToken) {
+    if (!accessToken || !idToken) {
       return sendPopupResponse({
         type: 'GOOGLE_AUTH_ERROR',
-        error: 'No access token returned from Google identity service.',
+        error: 'Incomplete tokens returned from Google identity endpoint.',
       });
     }
 
-    // 2. Retrieve verified user profile from Google OpenID Connect userinfo endpoint
+    // 2. Validate Google ID Token (Issuer, Audience, Expiration, Email Verification)
+    const verifiedIdToken = verifyGoogleIdToken(idToken, clientId);
+
+    // 3. Fetch verified UserInfo from Google OpenID Connect endpoint for cross-validation
     const userinfoResponse = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -200,37 +293,48 @@ export async function handleGoogleOAuthCallback(req: Request, res: Response) {
     if (!userinfoResponse.ok) {
       return sendPopupResponse({
         type: 'GOOGLE_AUTH_ERROR',
-        error: 'Failed to fetch verified user profile from Google.',
+        error: 'Failed to retrieve verified user profile from Google OpenID service.',
       });
     }
 
     const userProfile = await userinfoResponse.json();
 
-    // Verify email is verified by Google
-    if (!userProfile.email || userProfile.email_verified === false) {
+    // Verify sub matches between ID Token and UserInfo endpoint
+    if (userProfile.sub !== verifiedIdToken.sub) {
       return sendPopupResponse({
         type: 'GOOGLE_AUTH_ERROR',
-        error: 'Your Google email address is not verified by Google.',
+        error: 'Google user identity mismatch between ID token and userinfo endpoint.',
       });
     }
 
-    // Extract minimal user info securely
+    // Ensure verified email exists
+    const verifiedEmail = (userProfile.email || verifiedIdToken.email || '').toLowerCase();
+    if (!verifiedEmail) {
+      return sendPopupResponse({
+        type: 'GOOGLE_AUTH_ERROR',
+        error: 'No verified email address associated with this Google account.',
+      });
+    }
+
+    // Extract verified user metadata
     const verifiedUser = {
-      email: userProfile.email.toLowerCase(),
-      name: userProfile.name || userProfile.given_name || 'Google User',
+      email: verifiedEmail,
+      name: userProfile.name || verifiedIdToken.name || 'Google User',
       sub: userProfile.sub,
-      picture: userProfile.picture || '',
+      picture: userProfile.picture || verifiedIdToken.picture || '',
     };
+
+    console.log(`[GOOGLE OAUTH SUCCESS] Verified identity for ${verifiedUser.email} (sub: ${verifiedUser.sub})`);
 
     return sendPopupResponse({
       type: 'GOOGLE_AUTH_SUCCESS',
       user: verifiedUser,
     });
   } catch (err: any) {
-    console.error('Error handling Google OAuth callback:', err);
+    console.error('Error in Google OAuth callback:', err);
     return sendPopupResponse({
       type: 'GOOGLE_AUTH_ERROR',
-      error: 'An unexpected error occurred during Google authentication.',
+      error: err?.message || 'An unexpected error occurred during Google authentication.',
     });
   }
 }
