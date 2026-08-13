@@ -26,6 +26,11 @@ export const OtpVerificationStep: React.FC<OtpVerificationStepProps> = ({
 
   // Dispatch OTP via server API
   const dispatchOtp = async (targetChannel: 'email' | 'phone' = channel) => {
+    if (!email || !email.trim() || !email.includes('@')) {
+      setErrorMsg('Please provide a valid email address to receive your verification code.');
+      return;
+    }
+
     setIsSending(true);
     setErrorMsg(null);
     setOtpDigits(['', '', '', '', '', '']);
@@ -34,7 +39,7 @@ export const OtpVerificationStep: React.FC<OtpVerificationStepProps> = ({
       const res = await fetch('/api/auth/send-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, channel: targetChannel, phone }),
+        body: JSON.stringify({ email: email.trim(), channel: targetChannel, phone }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
@@ -46,7 +51,7 @@ export const OtpVerificationStep: React.FC<OtpVerificationStepProps> = ({
         }, 100);
       }
     } catch {
-      setErrorMsg('Network error dispatching OTP code. Please check your connection.');
+      setErrorMsg('Network error dispatching OTP code. Please check your server connection.');
     } finally {
       setIsSending(false);
     }

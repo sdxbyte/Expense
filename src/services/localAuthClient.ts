@@ -148,39 +148,63 @@ export function createLocalAuthClient(): any {
           error: null,
         };
       },
-      async signInWithGoogleUser({ email, name, sub, picture }: { email: string; name?: string; sub: string; picture?: string }) {
-        const trimmedEmail = email.trim().toLowerCase();
+      async signInWithGoogleUser(
+        param: string | { email: string; name?: string; sub?: string; picture?: string },
+        nameParam?: string
+      ) {
+        let emailStr = '';
+        let fullName = '';
+        let subStr = '';
+        let pictureUrl = '';
+
+        if (typeof param === 'string') {
+          emailStr = param;
+          fullName = nameParam || '';
+          subStr = 'sub_' + Math.random().toString(36).substring(2, 14);
+        } else if (param && typeof param === 'object') {
+          emailStr = param.email || '';
+          fullName = param.name || nameParam || '';
+          subStr = param.sub || 'sub_' + Math.random().toString(36).substring(2, 14);
+          pictureUrl = param.picture || '';
+        }
+
+        const trimmedEmail = emailStr.trim().toLowerCase();
+        if (!trimmedEmail) {
+          return {
+            data: { user: null, session: null },
+            error: { message: 'A valid email address is required for Google sign in.' },
+          };
+        }
+
         const users = getLocalUsers();
         let account = users[trimmedEmail];
 
         if (!account) {
-          // Create new SAARTHI user account using verified Google identity
+          // Create new user account using verified Google identity
           const newUser: User = {
-            id: 'usr_g_' + sub.substring(0, 12),
+            id: 'usr_g_' + subStr.substring(0, 12),
             email: trimmedEmail,
             user_metadata: {
-              full_name: name || 'Google User',
-              picture: picture || '',
-              google_sub: sub,
+              full_name: fullName || 'Google User',
+              picture: pictureUrl || '',
+              google_sub: subStr,
               provider: 'google',
             },
             aud: 'authenticated',
             created_at: new Date().toISOString(),
             app_metadata: { provider: 'google' },
-            role: 'authenticated', // Standard default user role, NEVER admin
+            role: 'authenticated',
           } as unknown as User;
 
           account = { user: newUser, passwordHash: '' };
           users[trimmedEmail] = account;
           saveLocalUsers(users);
         } else {
-          // Account already exists with this verified email -> Link Google provider safely
-          // Preserve existing SAARTHI account ID, created_at, role and permissions
           account.user.user_metadata = {
             ...account.user.user_metadata,
-            google_sub: sub,
-            picture: picture || account.user.user_metadata?.picture || '',
-            full_name: name || account.user.user_metadata?.full_name || '',
+            google_sub: subStr,
+            picture: pictureUrl || account.user.user_metadata?.picture || '',
+            full_name: fullName || account.user.user_metadata?.full_name || '',
           };
           users[trimmedEmail] = account;
           saveLocalUsers(users);
