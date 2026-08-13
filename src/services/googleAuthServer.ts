@@ -36,11 +36,28 @@ function getRedirectUri(req: Request): string {
 }
 
 /**
+ * Resolves Google Client ID and Client Secret from available server environment variables
+ */
+function getGoogleCredentials() {
+  const clientId =
+    process.env.GOOGLE_CLIENT_ID ||
+    process.env.CLIENT_ID ||
+    process.env.GMAIL_CLIENT_ID ||
+    '';
+  const clientSecret =
+    process.env.GOOGLE_CLIENT_SECRET ||
+    process.env.CLIENT_SECRET ||
+    process.env.GMAIL_CLIENT_SECRET ||
+    '';
+  return { clientId, clientSecret };
+}
+
+/**
  * Generates official Google OAuth 2.0 authorization URL with PKCE (S256)
  */
 export function getGoogleOAuthUrl(req: Request, res: Response) {
   try {
-    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const { clientId } = getGoogleCredentials();
     const redirectUri = getRedirectUri(req);
 
     if (!clientId) {
@@ -49,7 +66,7 @@ export function getGoogleOAuthUrl(req: Request, res: Response) {
         configured: false,
         url: null,
         redirectUri,
-        message: 'Google Sign-In GOOGLE_CLIENT_ID is not configured in server environment variables.',
+        message: 'Google Sign-In CLIENT_ID is not configured in server environment variables.',
       });
     }
 
@@ -234,8 +251,7 @@ export async function handleGoogleOAuthCallback(req: Request, res: Response) {
   }
   activeStates.delete(state); // Prevent replay attacks
 
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const { clientId, clientSecret } = getGoogleCredentials();
 
   if (!clientId || !clientSecret) {
     return sendPopupResponse({
