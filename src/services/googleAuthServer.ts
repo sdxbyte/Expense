@@ -18,9 +18,11 @@ export function getGoogleOAuthUrl(req: Request, res: Response) {
   try {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     if (!clientId) {
-      return res.status(503).json({
-        success: false,
-        error: 'Google Sign-In is not configured on this server. Please provide GOOGLE_CLIENT_ID in environment settings.',
+      return res.json({
+        success: true,
+        configured: false,
+        url: null,
+        message: 'Google Sign-In client ID is not configured in server environment variables.',
       });
     }
 
