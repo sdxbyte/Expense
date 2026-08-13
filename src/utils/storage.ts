@@ -109,12 +109,6 @@ export async function reverseExpense(id: string, reason: string = 'Correction / 
   }
   return null;
 }
-    await enqueueSyncOperation('expense', id, 'REVERSE', validExp, user.id);
-    triggerGitAutoSync('Reverse Expense');
-    return validExp;
-  }
-  return null;
-}
 
 export async function deleteExpense(id: string): Promise<void> {
   await reverseExpense(id, 'Record marked as reversed');
