@@ -113,9 +113,11 @@ export async function migrateLocalStorageToIndexedDB(): Promise<void> {
   }
 }
 
+export const MASTER_SHARED_ACCOUNT_ID = 'master_shared_ledger_account';
+
 /**
- * Strict User-Scoped IndexedDB Data Loader.
- * NEVER loads unassigned records automatically into current user context.
+ * Single Unified Master Account IndexedDB Data Loader.
+ * Session-wise user identification loads and persists data to a single unified master account.
  */
 export async function loadStateFromIndexedDB(currentUserId?: string): Promise<AppState> {
   try {
@@ -129,30 +131,30 @@ export async function loadStateFromIndexedDB(currentUserId?: string): Promise<Ap
       return DEFAULT_STATE;
     }
 
-    // Use compound/indexed Dexie user-scoped queries
-    const userExpenses = await db.expenses.where('userId').equals(currentUserId).toArray();
-    const activeExpenses = userExpenses.filter((e) => !e.deletedAt);
+    // Load all active expenses across the unified master account
+    const allExpenses = await db.expenses.toArray();
+    const activeExpenses = allExpenses.filter((e) => !e.deletedAt);
 
-    // Read user-scoped budgets
-    const userBudgets = await db.budgets.where('userId').equals(currentUserId).toArray();
-    const activeBudgets = userBudgets.filter((b) => !b.deletedAt);
+    // Read all budgets across the unified master account
+    const allBudgets = await db.budgets.toArray();
+    const activeBudgets = allBudgets.filter((b) => !b.deletedAt);
     const budgetsRecord: Record<string, number> = {};
     for (const b of activeBudgets) {
       budgetsRecord[b.id] = b.amount;
     }
 
-    // Read user-scoped or default categories
-    const userCategories = await db.categories.where('userId').equals(currentUserId).toArray();
-    const activeCategories = userCategories.filter((c) => !c.deletedAt).map((c) => c.name);
+    // Read all categories
+    const allCategories = await db.categories.toArray();
+    const activeCategories = allCategories.filter((c) => !c.deletedAt).map((c) => c.name);
     const categoriesList = activeCategories.length > 0 ? activeCategories : DEFAULT_STATE.categories;
 
-    // Read user-scoped custom currencies
-    const userCurrencies = await db.customCurrencies.where('userId').equals(currentUserId).toArray();
-    const activeCurrencies = userCurrencies.filter((c) => !c.deletedAt).map((c) => c.name);
+    // Read all custom currencies
+    const allCurrencies = await db.customCurrencies.toArray();
+    const activeCurrencies = allCurrencies.filter((c) => !c.deletedAt).map((c) => c.name);
 
-    // Read user-scoped lenders
-    const userLenders = await db.lenders.where('userId').equals(currentUserId).toArray();
-    const activeLenders = userLenders.filter((l) => !l.deletedAt).map((l) => l.name);
+    // Read all lenders
+    const allLenders = await db.lenders.toArray();
+    const activeLenders = allLenders.filter((l) => !l.deletedAt).map((l) => l.name);
 
     // Read settings
     const darkModeSetting = await db.settings.get('darkMode');
