@@ -65,7 +65,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
   const [showGooglePromptModal, setShowGooglePromptModal] = useState(false);
   const [googleEmailInput, setGoogleEmailInput] = useState('');
-  const [pendingAuthAction, setPendingAuthAction] = useState<'LOGIN' | 'SIGNUP' | 'GOOGLE'>('SIGNUP');
+  const [pendingAuthAction, setPendingAuthAction] = useState<'LOGIN' | 'SIGNUP'>('SIGNUP');
 
   // Listen for Google OAuth popup response
   useEffect(() => {
@@ -170,25 +170,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     }
   };
 
-  const handleStartGoogleSignInModal = (targetEmail: string) => {
+  const handleStartGoogleSignInModal = async (targetEmail: string) => {
     const trimmedEmail = targetEmail.trim().toLowerCase();
     if (!trimmedEmail || !trimmedEmail.includes('@')) {
-      setErrorMsg('Please enter a valid email address.');
+      setErrorMsg('Please enter a valid Google email address.');
       return;
     }
-    setEmail(trimmedEmail);
-    setPendingAuthAction('GOOGLE');
-    setShowGooglePromptModal(false);
-    setShowOtpStep(true);
+    await executeGoogleSignInWithEmail(trimmedEmail);
   };
 
   const handleGoogleSignIn = async () => {
     setErrorMsg(null);
     setSuccessMsg(null);
 
-    if (email && email.includes('@')) {
-      setPendingAuthAction('GOOGLE');
-      setShowOtpStep(true);
+    if (email && email.trim().includes('@')) {
+      await executeGoogleSignInWithEmail(email);
       return;
     }
 
@@ -312,8 +308,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       await handleCompleteSignUp();
     } else if (pendingAuthAction === 'LOGIN') {
       await handleCompleteSignIn();
-    } else if (pendingAuthAction === 'GOOGLE') {
-      await executeGoogleSignInWithEmail(email);
     }
   };
 
