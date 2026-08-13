@@ -1,0 +1,17 @@
+{
+  "name": "Ledger - Multi-Currency Expense Tracker",
+  "short_name": "Ledger",
+  "description": "Offline-first multi-currency expense tracker with cloud sync and budget manager",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#312e81",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

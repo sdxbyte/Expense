@@ -1,0 +1,6 @@
+{
+  "name": "Ledger Expense Tracker",
+  "description": "An offline-first, multi-currency expense tracker with monthly budgeting, debt tracking, charts, and backup capabilities.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
