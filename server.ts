@@ -73,7 +73,7 @@ app.post('/api/email-notify', async (req: Request, res: Response) => {
     
     // Construct sanitized email update report
     const emailReport = {
-      to: 's.adhikari8107@gmail.com',
+      to: req.body?.to || process.env.USER_EMAIL || 'user@example.com',
       subject: `[Ledger Update #${updateNumber || 28}] Version ${version || '2.4.0'} - Automatic Sync Report`,
       sentAt: new Date().toISOString(),
       body: {

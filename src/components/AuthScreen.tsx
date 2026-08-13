@@ -64,7 +64,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const [showGooglePromptModal, setShowGooglePromptModal] = useState(false);
-  const [googleEmailInput, setGoogleEmailInput] = useState('s.adhikari8107@gmail.com');
+  const [googleEmailInput, setGoogleEmailInput] = useState('');
 
   // Listen for Google OAuth popup response
   useEffect(() => {
@@ -200,7 +200,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
       // Show Google Account Selector Modal to recognize user's specific mail ID
       setShowGooglePromptModal(true);
-      setGoogleEmailInput(email.trim() || 's.adhikari8107@gmail.com');
+      setGoogleEmailInput(email.trim() || '');
     } catch (err: any) {
       setErrorMsg(err.message || 'Error initializing Google sign in.');
     } finally {
