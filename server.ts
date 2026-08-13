@@ -163,7 +163,20 @@ app.post('/api/git-sync', async (req: Request, res: Response) => {
     await runGitCommand(['commit', '-m', commitMsg], cwd);
 
     // 6. Push to remote main branch safely
-    const pushResult = await runGitCommand(['push', 'origin', 'main'], cwd);
+    let pushOutput = '';
+    let pushedRemote = false;
+    try {
+      const ghToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+      if (ghToken) {
+        await runGitCommand(['remote', 'set-url', 'origin', `https://x-access-token:${ghToken}@github.com/sdxbyte/Expense.git`], cwd).catch(() => {});
+      }
+      const pushResult = await runGitCommand(['push', '-u', 'origin', 'main'], cwd);
+      pushOutput = pushResult.stdout || pushResult.stderr;
+      pushedRemote = true;
+    } catch (pushErr: any) {
+      console.warn('Remote git push skipped or unauthenticated (local commit created):', pushErr?.message || pushErr);
+      pushOutput = 'Local commit created successfully. Remote push skipped (pending remote credentials).';
+    }
 
     // 7. Verify Remote Commit SHA
     const { stdout: verifiedCommit } = await runGitCommand(['rev-parse', '--short', 'HEAD'], cwd);
@@ -174,15 +187,17 @@ app.post('/api/git-sync', async (req: Request, res: Response) => {
     const adDate = now.toISOString().split('T')[0];
     const bsDate = 'BS 2083-04-27';
 
-    console.log(`Git auto-sync successful. Commit SHA: ${commitSha}`);
+    console.log(`Git auto-sync successful. Commit SHA: ${commitSha}, Pushed: ${pushedRemote}`);
 
     isSyncInProgress = false;
     return res.json({
       success: true,
-      status: 'PUSHED',
-      message: 'Successfully synchronized latest state with remote GitHub repository',
+      status: pushedRemote ? 'PUSHED' : 'LOCAL_COMMITTED',
+      message: pushedRemote
+        ? 'Successfully synchronized latest state with remote GitHub repository'
+        : 'Successfully committed changes locally to git repository',
       commitSha,
-      output: pushResult.stdout || pushResult.stderr,
+      output: pushOutput,
       adDate,
       bsDate,
     });
