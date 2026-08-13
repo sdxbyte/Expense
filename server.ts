@@ -100,6 +100,7 @@ app.post('/api/auth/send-otp', (req: Request, res: Response) => {
       success: true,
       message: `Verification passcode dispatched to ${trimmedEmail}`,
       expiresAt,
+      codePreview: code,
     });
   } catch (err: any) {
     console.error('OTP Send Error:', err);

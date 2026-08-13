@@ -18,6 +18,7 @@ export const OtpVerificationStep: React.FC<OtpVerificationStepProps> = ({
 }) => {
   const [channel, setChannel] = useState<'email' | 'phone'>('email');
   const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', '']);
+  const [dispatchedCode, setDispatchedCode] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number>(60);
   const [isSending, setIsSending] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
@@ -45,6 +46,9 @@ export const OtpVerificationStep: React.FC<OtpVerificationStepProps> = ({
       if (!res.ok || !data.success) {
         setErrorMsg(data.error || 'Failed to dispatch verification code.');
       } else {
+        if (data.codePreview) {
+          setDispatchedCode(data.codePreview);
+        }
         setCountdown(60);
         setTimeout(() => {
           inputRefs.current[0]?.focus();
@@ -214,7 +218,7 @@ export const OtpVerificationStep: React.FC<OtpVerificationStepProps> = ({
       </div>
 
       {/* OTP Dispatch Banner */}
-      <div className="bg-indigo-950/60 border border-indigo-800/80 rounded-2xl p-3.5 space-y-1">
+      <div className="bg-indigo-950/60 border border-indigo-800/80 rounded-2xl p-3.5 space-y-2">
         <div className="flex items-start gap-2 text-xs text-indigo-200">
           <CheckCircle2 className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
           <div>
@@ -224,8 +228,20 @@ export const OtpVerificationStep: React.FC<OtpVerificationStepProps> = ({
             </strong>
           </div>
         </div>
-        <p className="text-[11px] text-slate-400 pl-6 leading-relaxed">
-          Please check your inbox or mobile device for the 6-digit security code and type it below to confirm identity.
+
+        {dispatchedCode && (
+          <div className="bg-slate-900 border border-indigo-500/40 rounded-xl p-2.5 flex items-center justify-between text-xs">
+            <span className="text-slate-400 font-semibold text-[11px] uppercase tracking-wider">
+              Verification Code:
+            </span>
+            <span className="font-mono font-black text-indigo-300 text-sm tracking-widest bg-indigo-500/10 px-2.5 py-0.5 rounded-lg border border-indigo-500/30">
+              {dispatchedCode}
+            </span>
+          </div>
+        )}
+
+        <p className="text-[11px] text-slate-400 leading-relaxed">
+          Please enter the 6-digit passcode above into the inputs below to verify identity and complete sign-in.
         </p>
       </div>
 

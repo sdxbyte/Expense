@@ -71,6 +71,33 @@ export function createLocalAuthClient(): any {
           error: null,
         };
       },
+      async validateCredentials({ email, password }: { email: string; password: string }) {
+        const trimmedEmail = email.trim().toLowerCase();
+        const users = getLocalUsers();
+        const account = users[trimmedEmail];
+
+        if (!account) {
+          return {
+            data: { user: null },
+            error: { message: 'No registered account found with this email. Please create an account first.' },
+          };
+        }
+
+        const hashedInput = await hashPassword(password);
+        const matches = account.passwordHash === hashedInput || account.passwordHash === password;
+
+        if (!matches) {
+          return {
+            data: { user: null },
+            error: { message: 'Incorrect password. Please verify your password and try again.' },
+          };
+        }
+
+        return {
+          data: { user: account.user },
+          error: null,
+        };
+      },
       async signUp({ email, password, options }: { email: string; password: string; options?: { data?: { phone?: string } } }) {
         const trimmedEmail = email.trim().toLowerCase();
         const users = getLocalUsers();

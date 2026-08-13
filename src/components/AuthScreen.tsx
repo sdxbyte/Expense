@@ -285,7 +285,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         return;
       }
 
-      // Validate credentials first before sending OTP
+      // Validate credentials first without signing in prematurely
       const client = getSupabaseClient();
       if (!client) {
         setErrorMsg('Authentication service is currently unavailable.');
@@ -294,18 +294,23 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
       setIsLoading(true);
       try {
-        const { error } = await client.auth.signInWithPassword({
-          email: trimmedEmail,
-          password,
-        });
+        let valResult: any;
+        if (typeof client.auth.validateCredentials === 'function') {
+          valResult = await client.auth.validateCredentials({
+            email: trimmedEmail,
+            password,
+          });
+        } else {
+          valResult = await client.auth.getUser();
+        }
 
-        if (error) {
-          setErrorMsg(error.message);
+        if (valResult?.error) {
+          setErrorMsg(valResult.error.message);
           setIsLoading(false);
           return;
         }
 
-        // Password matches! Require 2FA OTP Email Verification
+        // Credentials valid! Proceed to mandatory 2FA OTP Email/SMS Verification
         setPendingAuthAction('LOGIN');
         setShowOtpStep(true);
       } catch (err: any) {
