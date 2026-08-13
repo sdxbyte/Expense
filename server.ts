@@ -166,20 +166,21 @@ app.post('/api/git-sync', async (req: Request, res: Response) => {
       console.warn('Git commit warning (proceeding with sync):', commitErr?.message || commitErr);
     }
 
-    // 6. Push to remote main branch safely
+    // 6. Push to remote main branch safely if GitHub token is present
     let pushOutput = '';
     let pushedRemote = false;
     try {
       const ghToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
       if (ghToken) {
         await runGitCommand(['remote', 'set-url', 'origin', `https://x-access-token:${ghToken}@github.com/sdxbyte/Expense.git`], cwd).catch(() => {});
+        const pushResult = await runGitCommand(['push', '-u', 'origin', 'main'], cwd);
+        pushOutput = pushResult.stdout || pushResult.stderr;
+        pushedRemote = true;
+      } else {
+        pushOutput = 'Local commit created successfully. Remote push skipped (GITHUB_TOKEN not set).';
       }
-      const pushResult = await runGitCommand(['push', '-u', 'origin', 'main'], cwd);
-      pushOutput = pushResult.stdout || pushResult.stderr;
-      pushedRemote = true;
     } catch (pushErr: any) {
-      console.warn('Remote git push skipped or unauthenticated:', pushErr?.message || pushErr);
-      pushOutput = 'Local commit created successfully. Remote push skipped (pending remote credentials).';
+      pushOutput = 'Local commit created successfully. Remote push skipped.';
     }
 
     // 7. Verify Remote Commit SHA
